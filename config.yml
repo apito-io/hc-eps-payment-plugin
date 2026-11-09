@@ -1,0 +1,81 @@
+# EPS
+plugin:
+  id: "hc-eps-payment-plugin"
+  language: "go"
+  title: "EPS"
+  icon: ""
+  description: "EPS hosted checkout for SaaS tenant plans. Credentials stay on the project."
+  capabilities:
+    - project.graphql
+    - project.rest
+    - console.settings
+  role: ""
+  enable: true
+  debug: false
+  version: "0.1.0"
+  author: "Apito"
+  repository_url: "https://github.com/apito-io/hc-eps-payment-plugin"
+  branch: ""
+  binary_path: "hc-eps-payment-plugin"
+  handshake_config:
+    protocol_version: 1
+    magic_cookie_key: "APITO_PLUGIN"
+    magic_cookie_value: "apito_plugin_magic_cookie_v1"
+  ui_config:
+    entry_path: ui.js
+    official: true
+    signed: true
+    publisher: Apito
+  contributions:
+    payment:
+      contract_version: 1
+      provider_id: eps
+      label: EPS
+      icon: landmark
+      flows:
+        - one_time
+      capabilities:
+        - hosted_redirect
+      operations:
+        initialize: epsInitialize
+        verify: epsVerify
+        review: epsReview
+    api:
+      scope: project
+      mutations:
+        - name: epsInitialize
+          description: Start EPS hosted checkout for this project
+        - name: epsVerify
+          description: Verify an EPS merchant transaction for this project
+        - name: epsReview
+          description: Render the public EPS review page for this project
+      rest:
+        - method: GET
+          path: /config
+          description: Non-secret EPS configuration flags
+          access: protected
+    ui:
+      ui_available: true
+      navigation:
+        - hidden: true
+          settings: true
+          label: EPS
+  env_vars:
+    - key: "EPS_ENABLED"
+      value: "true"
+    - key: "EPS_SANDBOX"
+      value: "true"
+    - key: "EPS_USERNAME"
+      value: ""
+    - key: "EPS_PASSWORD"
+      value: ""
+    - key: "EPS_HASH_KEY"
+      value: ""
+    - key: "EPS_MERCHANT_ID"
+      value: ""
+    - key: "EPS_STORE_ID"
+      value: ""
+    - key: "EPS_TRANSACTION_TYPE_ID"
+      value: "1"
+    - key: "EPS_APP_RETURN_URL"
+      value: ""

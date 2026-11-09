@@ -1,0 +1,8 @@
+hc-eps-payment-plugin
+hc-eps-payment-plugin.exe
+ui.js
+ui/node_modules
+*.zip
+*.test
+*.out
+.DS_Store

@@ -1,0 +1,11 @@
+{
+  "name": "hc-eps-payment-plugin-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  }
+}

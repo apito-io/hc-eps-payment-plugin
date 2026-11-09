@@ -1,0 +1,249 @@
+name: Build and Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g., v1.0.0)"
+        required: true
+        type: string
+env:
+  PLUGIN_ID: hc-eps-payment-plugin
+  BINARY_NAME: hc-eps-payment-plugin
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - run: go test -count=1 ./...
+      - name: Tag matches config.yml and sdk.Init version
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}"
+          VER="${TAG#v}"
+          python3 - << PY
+          import pathlib, re, sys
+          ver = """$VER"""
+          if not ver or ver.startswith("refs/"):
+              print("skip version check on untagged run", ver)
+              sys.exit(0)
+          cfg = pathlib.Path("config.yml").read_text()
+          main = pathlib.Path("main.go").read_text()
+          c = re.search(r'(?m)^  version:\s*"([^"]+)"', cfg)
+          m = re.search(r'sdk\.Init\("hc-eps-payment-plugin", "([^"]+)"', main)
+          if not c or not m:
+              sys.exit("could not parse versions")
+          if c.group(1) != ver or m.group(1) != ver:
+              sys.exit(f"config={c.group(1)} main={m.group(1)} tag={ver}")
+          print("ok", ver)
+          PY
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci && npm run build
+        working-directory: ui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-js
+          path: ui.js
+  build:
+    needs: [test, ui]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            arch: amd64
+            goos: linux
+            goarch: amd64
+          - platform: linux
+            arch: arm64
+            goos: linux
+            goarch: arm64
+          - platform: darwin
+            arch: amd64
+            goos: darwin
+            goarch: amd64
+          - platform: darwin
+            arch: arm64
+            goos: darwin
+            goarch: arm64
+          - platform: windows
+            arch: amd64
+            goos: windows
+            goarch: amd64
+          - platform: windows
+            arch: arm64
+            goos: windows
+            goarch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-js
+          path: .
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          BIN="${BINARY_NAME}"
+          if [ "$GOOS" = "windows" ]; then BIN="${BINARY_NAME}.exe"; fi
+          go build -trimpath -ldflags="-s -w" -o "$BIN" .
+          test -f ui.js
+          ls -lh "$BIN" ui.js
+      - name: Zip
+        id: zip
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}"
+          BIN="${BINARY_NAME}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN="${BINARY_NAME}.exe"; fi
+          ZIP_NAME="${PLUGIN_ID}-${TAG}-${{ matrix.platform }}-${{ matrix.arch }}.zip"
+          zip -X "$ZIP_NAME" "$BIN" config.yml ui.js
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ steps.zip.outputs.zip_name }}
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Tag
+        id: tag_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ github.event.inputs.version }}"
+          else
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: build-*
+          merge-multiple: true
+      - name: Flatten and checksum
+        run: |
+          mkdir -p release
+          for f in artifacts/*.zip artifacts/build-*/*.zip; do
+            [ -f "$f" ] && cp "$f" release/
+          done
+          cd release
+          sha256sum *.zip | tee "${{ env.PLUGIN_ID }}-${{ steps.tag_version.outputs.tag }}-checksums.txt"
+          ls -la
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.tag }}
+          name: Release ${{ steps.tag_version.outputs.tag }}
+          body: |
+            EPS ${{ steps.tag_version.outputs.tag }}
+
+            Each zip contains the plugin binary, config.yml, and ui.js at the archive root.
+
+            Install via Engine super-admin marketplace or:
+            ```
+            apito plugin add hc-eps-payment-plugin
+            ```
+          files: release/*
+          draft: false
+          prerelease: false
+
+  notify-registry:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect assets and dispatch
+        env:
+          GH_TOKEN: ${{ secrets.REGISTRY_DISPATCH_TOKEN }}
+          PLUGIN_ID_ENV: ${{ env.PLUGIN_ID }}
+          TAG_ENV: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+        run: |
+          python3 << 'PYEOF'
+          import json, os, subprocess, sys, urllib.request
+
+          plugin_id = os.environ["PLUGIN_ID_ENV"]
+          tag = os.environ["TAG_ENV"]
+          version = tag.lstrip("v")
+          gh_token = os.environ.get("GH_TOKEN", "")
+          repo = f"apito-io/{plugin_id}"
+
+          if not gh_token:
+              print("::warning::REGISTRY_DISPATCH_TOKEN not set — skipping registry sync")
+              sys.exit(0)
+
+          # 1. Fetch release assets metadata
+          api_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+          req = urllib.request.Request(api_url)
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              release = json.loads(resp.read())
+
+          # 2. Fetch checksums
+          checksums = {}
+          checksums_url = f"https://github.com/{repo}/releases/download/{tag}/{plugin_id}-{tag}-checksums.txt"
+          try:
+              with urllib.request.urlopen(checksums_url, timeout=30) as resp:
+                  for line in resp.read().decode().strip().split("\n"):
+                      parts = line.split()
+                      if len(parts) == 2:
+                          checksums[parts[1]] = parts[0]
+          except Exception as e:
+              print(f"::warning::Could not fetch checksums: {e}")
+
+          # 3. Build assets array
+          assets = []
+          for a in release.get("assets", []):
+              name = a["name"]
+              if not name.endswith(".zip") or "checksums" in name:
+                  continue
+              parts = name.replace(".zip", "").rsplit("-", 2)
+              if len(parts) < 3:
+                  continue
+              assets.append({
+                  "os": parts[-2],
+                  "arch": parts[-1],
+                  "url": a["browser_download_url"],
+                  "size": a["size"],
+                  "sha256": checksums.get(name, ""),
+              })
+
+          # 4. Dispatch to plugins registry
+          payload = json.dumps({
+              "event_type": "plugin-release",
+              "client_payload": {
+                  "plugin_id": plugin_id,
+                  "version": version,
+                  "tag": tag,
+                  "repository": f"https://github.com/{repo}",
+                  "assets": assets,
+              },
+          })
+
+          req = urllib.request.Request(
+              "https://api.github.com/repos/apito-io/plugins/dispatches",
+              data=payload.encode(),
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {gh_token}",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              print(f"✅ Dispatched registry update: {plugin_id} {version} (HTTP {resp.status})")
+          PYEOF
