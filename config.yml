@@ -12,7 +12,7 @@ plugin:
   role: ""
   enable: true
   debug: false
-  version: "0.1.0"
+  version: "0.1.1"
   author: "Apito"
   repository_url: "https://github.com/apito-io/hc-eps-payment-plugin"
   branch: ""
@@ -40,6 +40,7 @@ plugin:
         initialize: epsInitialize
         verify: epsVerify
         review: epsReview
+        cancel: epsCancel
     api:
       scope: project
       mutations:
@@ -49,6 +50,8 @@ plugin:
           description: Verify an EPS merchant transaction for this project
         - name: epsReview
           description: Render the public EPS review page for this project
+        - name: epsCancel
+          description: EPS takes a one-time payment and does not end a subscription
       rest:
         - method: GET
           path: /config

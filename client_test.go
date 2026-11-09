@@ -13,6 +13,21 @@ import (
 	"testing"
 )
 
+func TestCancelRepliesNotSupported(t *testing.T) {
+	raw, err := cancelResolver(context.Background(), map[string]interface{}{"mode": "revoke"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _ := raw.(string)
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["error"] != "not supported" {
+		t.Fatalf("payload=%v", payload)
+	}
+}
+
 func TestEPSHashMatchesHMACSHA512(t *testing.T) {
 	mac := hmac.New(sha512.New, []byte("hash-key"))
 	_, _ = mac.Write([]byte("merchant-1"))

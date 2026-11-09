@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	plugin := sdk.Init("hc-eps-payment-plugin", "0.1.0", "")
+	plugin := sdk.Init("hc-eps-payment-plugin", "0.1.1", "")
 	plugin.RegisterMutation("epsInitialize",
 		sdk.FieldWithArgs("String", "Start an EPS hosted checkout", map[string]interface{}{
 			"merchant_transaction_id": sdk.StringArg("Merchant transaction id"),
@@ -28,6 +28,12 @@ func main() {
 			"merchant_transaction_id": sdk.StringArg("Merchant transaction id"),
 		}),
 		verifyResolver,
+	)
+	plugin.RegisterMutation("epsCancel",
+		sdk.FieldWithArgs("String", "EPS does not keep a subscription to cancel", map[string]interface{}{
+			"mode": sdk.StringArg("cancel or revoke"),
+		}),
+		cancelResolver,
 	)
 	plugin.RegisterMutation("epsReview",
 		sdk.FieldWithArgs("String", "Render the public EPS review page", map[string]interface{}{
@@ -82,6 +88,16 @@ func verifyResolver(ctx context.Context, args map[string]interface{}) (interface
 		"transaction_date":        result.TransactionDate,
 		"error_message":           result.ErrorMessage,
 	})
+	return string(raw), nil
+}
+
+func cancelResolver(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	raw, err := json.Marshal(map[string]interface{}{
+		"error": "not supported",
+	})
+	if err != nil {
+		return nil, err
+	}
 	return string(raw), nil
 }
 
